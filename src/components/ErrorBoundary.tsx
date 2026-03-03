@@ -1,4 +1,5 @@
 import React, { ReactNode } from 'react';
+import { logger } from '../lib/logger';
 
 interface Props {
   children: ReactNode;
@@ -20,7 +21,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('[ErrorBoundary] Unhandled error:', error, errorInfo);
+    logger.error('[ErrorBoundary] Unhandled error:', error, errorInfo);
   }
 
   render() {

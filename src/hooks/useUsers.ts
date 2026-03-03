@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { userService } from '../services/userService';
 import { User, CreateUserPayload } from '../types/api';
+import { logger } from '../lib/logger';
 
 interface UseUsersReturn {
   users: User[];
@@ -19,18 +20,18 @@ export function useUsers(): UseUsersReturn {
 
   const fetchUsers = async () => {
     try {
-      console.log('[useUsers] Iniciando carregamento...');
+      logger.debug('[useUsers] Iniciando carregamento...');
       setIsLoading(true);
       setError(null);
       const data = await userService.getAll();
-      console.log('[useUsers] Dados recebidos:', data?.length, 'usuários');
+      logger.debug('[useUsers] Dados recebidos:', data?.length, 'usuários');
       // Garantir que é sempre um array
       const usersData = Array.isArray(data) ? data : [];
       setUsers(usersData);
       setIsLoading(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao carregar usuários';
-      console.error('[useUsers] ERRO:', message, err);
+      logger.error('[useUsers] ERRO:', message);
       setError(message);
       setUsers([]);
       setIsLoading(false);

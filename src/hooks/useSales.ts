@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { saleService } from '../services/saleService';
 import { Sale, CreateSalePayload, CreateSaleResult } from '../types/api';
+import { logger } from '../lib/logger';
 
 interface UseSalesReturn {
   sales: Sale[];
@@ -18,16 +19,11 @@ export function useSales(): UseSalesReturn {
 
   const fetchSales = async () => {
     try {
-      console.log('[useSales] Iniciando carregamento...');
+      logger.debug('[useSales] Iniciando carregamento...');
       setIsLoading(true);
       setError(null);
       const data = await saleService.getAll();
-      console.log('[useSales] Dados recebidos:', data?.length, 'vendas');
-      
-      // DEBUG: Ver estrutura da primeira venda
-      if (data && data.length > 0) {
-        console.log('[useSales] Exemplo de venda existente:', JSON.stringify(data[0], null, 2));
-      }
+      logger.debug('[useSales] Dados recebidos:', data?.length, 'vendas');
       
       // Garantir que é sempre um array
       const salesData = Array.isArray(data) ? data : [];
@@ -35,7 +31,7 @@ export function useSales(): UseSalesReturn {
       setIsLoading(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao carregar vendas';
-      console.error('[useSales] ERRO:', message, err);
+      logger.error('[useSales] ERRO:', message);
       setError(message);
       setSales([]);
       setIsLoading(false);

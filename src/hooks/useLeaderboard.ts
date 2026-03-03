@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { userService } from '../services/userService';
 import { saleService } from '../services/saleService';
 import { LeaderboardEntry } from '../types/api';
+import { logger } from '../lib/logger';
 
 interface UseLeaderboardReturn {
   leaderboard: LeaderboardEntry[];
@@ -15,10 +16,12 @@ export function useLeaderboard(): UseLeaderboardReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLeaderboard = async () => {
+  const fetchLeaderboard = useCallback(async (showLoader = true) => {
     try {
-      console.log('[useLeaderboard] Iniciando carregamento...');
-      setIsLoading(true);
+      logger.debug('[useLeaderboard] Iniciando carregamento...');
+      if (showLoader) {
+        setIsLoading(true);
+      }
       setError(null);
 
       // Buscar dados em paralelo
@@ -27,11 +30,11 @@ export function useLeaderboard(): UseLeaderboardReturn {
         saleService.getAll(),
       ]);
 
-      console.log('[useLeaderboard] Dados recebidos - Users:', users?.length, 'Sales:', sales?.length);
+      logger.debug('[useLeaderboard] Dados recebidos - Users:', users?.length, 'Sales:', sales?.length);
 
       // Se não houver usuários, retorna array vazio
       if (!Array.isArray(users) || users.length === 0) {
-        console.log('[useLeaderboard] Sem usuários, retornando array vazio');
+        logger.debug('[useLeaderboard] Sem usuários, retornando array vazio');
         setLeaderboard([]);
         setIsLoading(false);
         return;
@@ -39,16 +42,17 @@ export function useLeaderboard(): UseLeaderboardReturn {
 
       // Se não houver vendas, calcula ranking com todos em 0
       const salesArray = Array.isArray(sales) ? sales : [];
-      console.log('[useLeaderboard] Processando ranking...');
+      logger.debug('[useLeaderboard] Processando ranking...');
 
       // Calcular ranking para cada usuário
       const entries: LeaderboardEntry[] = users
         .map((user) => {
           const userSales = salesArray.filter((sale) => sale.uuid === user.uuid);
-          const totalSales = userSales.reduce((sum, s) => sum + s.quantity, 0);
-          const totalRevenue = userSales.reduce((sum, s) => sum + s.total, 0);
+          const confirmedUserSales = userSales.filter((sale) => sale.status === true);
+          const totalSales = confirmedUserSales.reduce((sum, sale) => sum + sale.quantity, 0);
+          const totalRevenue = confirmedUserSales.reduce((sum, sale) => sum + sale.total, 0);
           const salesCount = userSales.length;
-          const confirmedSales = userSales.filter((s) => s.status === true).length;
+          const confirmedSales = confirmedUserSales.length;
 
           return {
             user,
@@ -72,27 +76,46 @@ export function useLeaderboard(): UseLeaderboardReturn {
           rank: index + 1,
         }));
 
-      console.log('[useLeaderboard] Ranking processado:', entries.length, 'entradas');
+      logger.debug('[useLeaderboard] Ranking processado:', entries.length, 'entradas');
       setLeaderboard(entries);
       setIsLoading(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erro ao carregar ranking';
-      console.error('[useLeaderboard] ERRO:', message, err);
+      logger.error('[useLeaderboard] ERRO:', message);
       setError(message);
       setLeaderboard([]);
       setIsLoading(false);
     }
-  };
+  }, []);
 
   // Buscar dados ao montar o componente
   useEffect(() => {
-    fetchLeaderboard();
-  }, []);
+    fetchLeaderboard(true);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchLeaderboard(false);
+      }
+    }, 30000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchLeaderboard(false);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchLeaderboard]);
 
   return {
     leaderboard,
     isLoading,
     error,
-    refetch: fetchLeaderboard,
+    refetch: () => fetchLeaderboard(true),
   };
 }

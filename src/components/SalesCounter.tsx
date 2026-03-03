@@ -32,7 +32,7 @@ export function SalesCounter({ target, delay = 0, dark = false }: SalesCounterPr
         {count.toLocaleString('pt-BR')}
       </div>
       <p className={`text-xs uppercase tracking-widest font-bold ${
-        dark ? 'text-hm-gray-400' : 'text-hm-gray-400'
+        dark ? 'text-hm-gray-300' : 'text-hm-gray-400'
       }`}>
         produtos
       </p>

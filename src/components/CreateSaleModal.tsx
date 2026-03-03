@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { User, CreateSalePayload, CreateSaleResult } from '../types/api';
+import { logger } from '../lib/logger';
 
 interface CreateSaleModalProps {
   isOpen: boolean;
@@ -89,7 +90,11 @@ export function CreateSaleModal({
   const updateQuantity = (quantity: number) => {
     const safeQuantity = Math.max(1, quantity);
     const calculatedAmountCents = safeQuantity * UNIT_PRICE * 100; // centavos
-    console.log('[Modal] Quantidade:', safeQuantity, '| Valor (centavos):', calculatedAmountCents, '| R$:', (calculatedAmountCents / 100).toFixed(2));
+    logger.debug('[Modal] Quantidade/valor recalculados', {
+      quantity: safeQuantity,
+      amountCents: calculatedAmountCents,
+      amountBRL: (calculatedAmountCents / 100).toFixed(2),
+    });
     setFormData((prev) => ({
       ...prev,
       quantity: safeQuantity,
@@ -124,9 +129,9 @@ export function CreateSaleModal({
     try {
       setIsSubmitting(true);
       setError(null);
-      console.log('[Modal] Submetendo venda:', formData);
+      logger.debug('[Modal] Submetendo venda', formData);
       const result = await onSubmit(formData);
-      console.log('[Modal] Resultado:', result);
+      logger.debug('[Modal] Resultado createSale', result);
       setPixQrCodeBase64(result.brCodeBase64);
       
       // Reset form
@@ -136,8 +141,8 @@ export function CreateSaleModal({
         amount: UNIT_PRICE * 100, // em centavos
       });
     } catch (err: any) {
-      console.error('[Modal] Erro ao criar venda:', err);
-      console.error('[Modal] Resposta de erro:', err.response?.data);
+      logger.error('[Modal] Erro ao criar venda');
+      logger.debug('[Modal] Resposta de erro:', err.response?.data);
       
       let message = 'Erro ao criar venda';
       if (err.response?.data?.error?.message) {

@@ -1,31 +1,24 @@
 import { motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { LeaderboardPodium } from './components/LeaderboardPodium';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { CreateSaleModal } from './components/CreateSaleModal';
 import { useLeaderboard } from './hooks/useLeaderboard';
-import { useSales } from './hooks/useSales';
 import { useUsers } from './hooks/useUsers';
 import { CreateSalePayload } from './types/api';
+import { saleService } from './services/saleService';
 import './index.css';
 
 function App() {
   const { leaderboard, isLoading: leaderboardLoading, error: leaderboardError, refetch: refetchLeaderboard } = useLeaderboard();
-  const { createSale } = useSales();
   const { users } = useUsers();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const isLoading = leaderboardLoading;
   const error = leaderboardError;
 
-  // Log para debug
-  useEffect(() => {
-    console.log('[App] Leaderboard:', leaderboard);
-    console.log('[App] Error:', leaderboardError);
-  }, [leaderboard, leaderboardError]);
-
   const handleCreateSale = async (data: CreateSalePayload) => {
-    const result = await createSale(data);
+    const result = await saleService.create(data);
     // Refetch leaderboard para atualizar
     await refetchLeaderboard();
     return result;

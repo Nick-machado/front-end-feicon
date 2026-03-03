@@ -1,5 +1,6 @@
 import apiClient from './api';
 import { Sale, CreateSalePayload, CreateSaleResult } from '../types/api';
+import { logger } from '../lib/logger';
 
 export const saleService = {
   async getAll(): Promise<Sale[]> {
@@ -13,8 +14,7 @@ export const saleService = {
   },
 
   async create(data: CreateSalePayload): Promise<CreateSaleResult> {
-    console.log('[saleService] Enviando venda:', JSON.stringify(data, null, 2));
-    console.log('[saleService] Quantidade:', data.quantity, '| Amount calculado:', data.amount);
+    logger.debug('[saleService] Enviando venda', { quantity: data.quantity, uuid: data.uuid, amount: data.amount });
     
     try {
       const response = await apiClient.post<{
@@ -29,7 +29,7 @@ export const saleService = {
         };
       }>('/sales', data);
 
-      console.log('[saleService] Resposta completa:', JSON.stringify(response.data, null, 2));
+      logger.debug('[saleService] Venda criada com sucesso');
 
       const sale = response.data?.data?.sale;
 
@@ -44,12 +44,8 @@ export const saleService = {
         brCodeBase64,
       };
     } catch (error: any) {
-      console.error('[saleService] ERRO ao criar venda:', error);
-      console.error('[saleService] Status:', error.response?.status);
-      console.error('[saleService] Response data completo:', JSON.stringify(error.response?.data, null, 2));
-      console.error('[saleService] Error message:', error.response?.data?.error?.message);
-      console.error('[saleService] Error details:', JSON.stringify(error.response?.data?.error?.details, null, 2));
-      console.error('[saleService] Payload enviado:', JSON.stringify(data, null, 2));
+      logger.error('[saleService] ERRO ao criar venda:', error?.response?.status || error?.message || 'erro desconhecido');
+      logger.debug('[saleService] Detalhes erro createSale:', error?.response?.data);
       throw error;
     }
   },
