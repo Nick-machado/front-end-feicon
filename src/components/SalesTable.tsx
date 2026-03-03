@@ -14,6 +14,7 @@ export function SalesTable() {
     quantity: 1,
     uuid: users[0]?.uuid || '',
     amount: 0,
+    method: 'pix',
   });
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -31,6 +32,7 @@ export function SalesTable() {
         quantity: 1,
         uuid: users[0]?.uuid || '',
         amount: 0,
+        method: 'pix',
       });
       setShowForm(false);
     } catch (error) {

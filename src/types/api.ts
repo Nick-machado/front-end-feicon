@@ -67,4 +67,5 @@ export interface CreateSalePayload {
   quantity: number;
   uuid: string;
   amount: number;
+  method: 'pix' | 'dinheiro';
 }

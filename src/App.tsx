@@ -19,8 +19,6 @@ function App() {
 
   const handleCreateSale = async (data: CreateSalePayload) => {
     const result = await saleService.create(data);
-    // Refetch leaderboard para atualizar
-    await refetchLeaderboard();
     return result;
   };
 
@@ -105,6 +103,7 @@ function App() {
         onClose={() => setIsModalOpen(false)}
         onSubmit={handleCreateSale}
         users={users}
+        onLeaderboardUpdate={refetchLeaderboard}
       />
     </div>
   );

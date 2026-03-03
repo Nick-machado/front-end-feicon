@@ -2,7 +2,10 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../lib/logger';
 
 const isDev = import.meta.env.DEV;
-const baseURL = import.meta.env.VITE_API_URL || (isDev ? '/api' : 'https://api-feicon.onrender.com');
+const envApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const baseURL = isDev
+  ? (envApiUrl && envApiUrl.startsWith('/') ? envApiUrl : '/api')
+  : (envApiUrl || 'https://api-feicon.onrender.com');
 
 logger.debug('[API] Modo desenvolvimento:', isDev);
 logger.debug('[API] Base URL:', baseURL);
