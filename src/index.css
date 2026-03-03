@@ -1,0 +1,56 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 400;
+  background-color: #F9F9F9;
+  color: #333333;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #1F1F1F;
+}
+
+.font-display {
+  font-family: 'Roboto Condensed', sans-serif;
+  font-weight: 700;
+}
+
+.font-btn {
+  font-family: 'Montserrat', sans-serif;
+}
+
+/* Industrial label style */
+.label-industrial {
+  font-family: 'Roboto', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666666;
+}
+
+/* HM Green highlight numbers */
+.number-highlight {
+  font-family: 'Roboto Condensed', sans-serif;
+  font-weight: 700;
+  color: #BCCF00;
+}
