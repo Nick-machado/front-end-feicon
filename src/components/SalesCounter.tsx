@@ -28,10 +28,10 @@ export function SalesCounter({ target, delay = 0, dark = false }: SalesCounterPr
 
   return (
     <motion.div className="flex flex-col items-center gap-1">
-      <div className="font-display text-4xl font-black text-hm-green">
+      <div className="font-display text-5xl font-black text-hm-green">
         {count.toLocaleString('pt-BR')}
       </div>
-      <p className={`text-xs uppercase tracking-widest font-bold ${
+      <p className={`text-sm uppercase tracking-widest font-bold ${
         dark ? 'text-hm-gray-300' : 'text-hm-gray-400'
       }`}>
         produtos

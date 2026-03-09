@@ -55,8 +55,8 @@ export function LeaderboardCard({
           relative
           rounded
           border
-          p-5 md:p-7
-          flex flex-col md:flex-row md:items-center gap-5
+          p-6 md:p-9
+          flex flex-col md:flex-row md:items-center gap-6
           cursor-pointer
           transition-shadow duration-200
           overflow-hidden
@@ -77,7 +77,7 @@ export function LeaderboardCard({
         {/* Rank watermark */}
         <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none select-none">
           <span
-            className={`font-display text-[7rem] font-black leading-none ${
+            className={`font-display text-[8rem] md:text-[9rem] font-black leading-none ${
               isFirst ? 'text-hm-green/10' : 'text-hm-gray-900/5'
             }`}
           >
@@ -86,9 +86,9 @@ export function LeaderboardCard({
         </div>
 
         {/* Content */}
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center w-full gap-5">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center w-full gap-6">
           {/* Avatar + Badge */}
-          <div className="flex items-center gap-4 flex-shrink-0">
+          <div className="flex items-center gap-5 flex-shrink-0">
             <RankBadge rank={rankAs123} />
             <Avatar
               srcCandidates={avatarCandidates}
@@ -100,14 +100,14 @@ export function LeaderboardCard({
           {/* Info */}
           <div className="flex-grow">
             <h3
-              className={`font-black text-lg md:text-xl uppercase tracking-tight mb-0.5 ${
+              className={`font-black text-xl md:text-2xl uppercase tracking-tight mb-1 ${
                 isFirst ? 'text-hm-white' : 'text-hm-gray-900'
               }`}
             >
               {user.name}
             </h3>
             <p
-              className={`text-xs uppercase tracking-widest font-medium mb-3 ${
+              className={`text-sm uppercase tracking-widest font-medium mb-4 ${
                 isFirst ? 'text-hm-gray-300' : 'text-hm-gray-400'
               }`}
             >

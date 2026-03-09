@@ -15,9 +15,9 @@ export function RankBadge({ rank }: RankBadgeProps) {
     <div
       className={`
         flex items-center justify-center
-        w-10 h-10 rounded
+        w-12 h-12 rounded
         ${s.bg} ${s.text}
-        font-display font-black text-lg
+        font-display font-black text-xl
         flex-shrink-0
       `}
     >
