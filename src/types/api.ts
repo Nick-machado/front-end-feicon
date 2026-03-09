@@ -63,9 +63,22 @@ export interface CreateUserPayload {
   sector: string;
 }
 
-export interface CreateSalePayload {
+export interface ProductSelection {
+  id: number;
   quantity: number;
+}
+
+export interface CreateSalePayload {
+  products: ProductSelection[];
   uuid: string;
   amount: number;
   method: 'pix' | 'dinheiro';
+  local: boolean;
+}
+
+export interface Stock {
+  id: number;
+  product: string;
+  quantity: number;
+  created_at: string;
 }

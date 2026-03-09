@@ -1,27 +1,74 @@
+import { useEffect, useMemo, useState } from 'react';
+
 interface AvatarProps {
-  src: string;
+  src?: string;
+  srcCandidates?: string[];
+  cacheKey?: string;
   alt: string;
-  rank: 1 | 2 | 3;
 }
 
-const borderColors = {
-  1: 'border-hm-green',
-  2: 'border-hm-gray-600',
-  3: 'border-hm-gray-400',
-};
+const successfulAvatarUrlByKey = new Map<string, string>();
 
-export function Avatar({ src, alt, rank }: AvatarProps) {
+export function Avatar({ src, srcCandidates = [], cacheKey, alt }: AvatarProps) {
+  const normalizedCandidates = useMemo(
+    () => (srcCandidates.length > 0 ? srcCandidates : src ? [src] : []),
+    [src, srcCandidates]
+  );
+  const candidateSignature = normalizedCandidates.join('|');
+  const fallbackUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+    alt
+  )}&backgroundColor=BCCF00&textColor=000000`;
+  const cachedUrl = cacheKey ? successfulAvatarUrlByKey.get(cacheKey) : undefined;
+  const initialUrl =
+    cachedUrl && normalizedCandidates.includes(cachedUrl)
+      ? cachedUrl
+      : normalizedCandidates[0] || fallbackUrl;
+  const initialIndex = Math.max(0, normalizedCandidates.indexOf(initialUrl));
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [imageSrc, setImageSrc] = useState(initialUrl);
+
+  useEffect(() => {
+    setCandidateIndex(initialIndex);
+    setImageSrc(initialUrl);
+  }, [candidateSignature, fallbackUrl, cacheKey]);
+
+  const isFallback = imageSrc === fallbackUrl;
+
   return (
     <div
       className={`
-        w-16 h-16
-        rounded
+        w-14 h-14 sm:w-16 sm:h-16
+        rounded-full
         overflow-hidden
-        border-2 ${borderColors[rank]}
         flex-shrink-0
+        ${isFallback ? 'border-2 border-hm-green' : ''}
       `}
     >
-      <img src={src} alt={alt} className="w-full h-full object-cover" />
+      <img
+        src={imageSrc}
+        alt={alt}
+        className="w-full h-full object-cover"
+        loading="eager"
+        decoding="async"
+        onLoad={() => {
+          if (cacheKey && imageSrc !== fallbackUrl) {
+            successfulAvatarUrlByKey.set(cacheKey, imageSrc);
+          }
+        }}
+        onError={() => {
+          if (imageSrc === fallbackUrl) {
+            return;
+          }
+
+          const nextIndex = candidateIndex + 1;
+          if (nextIndex < normalizedCandidates.length) {
+            setCandidateIndex(nextIndex);
+            setImageSrc(normalizedCandidates[nextIndex]);
+            return;
+          }
+          setImageSrc(fallbackUrl);
+        }}
+      />
     </div>
   );
 }

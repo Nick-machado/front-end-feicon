@@ -1,9 +1,15 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { User, CreateSalePayload, CreateSaleResult } from '../types/api';
+import { X, Loader2, Minus, Plus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { User, CreateSalePayload, CreateSaleResult, ProductSelection } from '../types/api';
 import { logger } from '../lib/logger';
 import { usePaymentSocket } from '../hooks/usePaymentSocket';
+import {
+  buildAvatarCandidates,
+  getResolvedAvatarUrl,
+  preloadAvatarsForUsers,
+  rememberResolvedAvatarUrl,
+} from '../lib/avatar';
 
 interface CreateSaleModalProps {
   isOpen: boolean;
@@ -12,17 +18,13 @@ interface CreateSaleModalProps {
   users: User[];
   isLoading?: boolean;
   onLeaderboardUpdate?: () => void;
+  onStockUpdate?: () => void;
 }
 
-type ModalStep = 'form' | 'method' | 'result';
+type ModalStep = 'seller' | 'quantity' | 'summary' | 'method' | 'pixQr' | 'confirmation';
 
-type UserWithPhoto = User & {
-  avatarUrl?: string;
-  photoUrl?: string;
-  image?: string;
-  avatar?: string;
-  photo?: string;
-};
+const sortUsersAlphabetically = (list: User[]) =>
+  [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
 
 export function CreateSaleModal({
   isOpen,
@@ -31,34 +33,51 @@ export function CreateSaleModal({
   users,
   isLoading = false,
   onLeaderboardUpdate,
+  onStockUpdate,
 }: CreateSaleModalProps) {
-  const UNIT_PRICE = 15;
-  const QUICK_QUANTITIES = [1, 2, 3, 5, 10];
+  const UNIT_PRICE = 20;
+  const AVAILABLE_PRODUCTS = [
+    { id: 1, name: 'branco', displayName: 'Branco', color: '#FFFFFF', borderColor: '#666666' },
+    { id: 2, name: 'cinza', displayName: 'Cinza', color: '#666666', borderColor: 'transparent' },
+    { id: 3, name: 'aluminio', displayName: 'Alumínio', color: '#999999', borderColor: 'transparent' },
+    { id: 4, name: 'preto', displayName: 'Preto', color: '#000000', borderColor: '#666666' },
+  ];
 
-  const [currentStep, setCurrentStep] = useState<ModalStep>('form');
+  const [currentStep, setCurrentStep] = useState<ModalStep>('seller');
   const [selectedMethod, setSelectedMethod] = useState<'pix' | 'dinheiro' | null>(null);
   const [saleId, setSaleId] = useState<string | number | null>(null);
-  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState<Record<string, number>>({
+    branco: 0,
+    cinza: 0,
+    aluminio: 0,
+    preto: 0,
+  });
   const [formData, setFormData] = useState<CreateSalePayload>({
-    quantity: 1,
-    uuid: users[0]?.uuid || '',
-    amount: 1 * UNIT_PRICE * 100,
+    products: [],
+    uuid: sortUsersAlphabetically(users)[0]?.uuid || '',
+    amount: 0,
     method: 'pix',
+    local: true,
   });
   const [pixQrCodeBase64, setPixQrCodeBase64] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedUserAvatarIndex, setSelectedUserAvatarIndex] = useState(0);
+  const [selectedUserAvatarSrc, setSelectedUserAvatarSrc] = useState<string | null>(null);
   const autoCloseTimeoutRef = useRef<number | null>(null);
-  const shouldEnableSocket = isOpen && currentStep === 'result' && selectedMethod === 'pix' && !!saleId;
+  const shouldEnableSocket = isOpen && currentStep === 'pixQr' && selectedMethod === 'pix' && !!saleId;
+
+  const sortedUsers = useMemo(() => sortUsersAlphabetically(users), [users]);
 
   const { isConnected, joinSale, leaveSale, startPollingFallback, stopPollingFallback } =
     usePaymentSocket({
       enabled: shouldEnableSocket,
       onPaymentConfirmed: () => {
         logger.debug('[Modal] ✓ Pagamento confirmado via WebSocket');
-        setShowSuccessAnimation(true);
+        setCurrentStep('confirmation');
         stopPollingFallback();
         onLeaderboardUpdate?.();
+        onStockUpdate?.();
 
         if (autoCloseTimeoutRef.current) {
           window.clearTimeout(autoCloseTimeoutRef.current);
@@ -66,7 +85,7 @@ export function CreateSaleModal({
 
         autoCloseTimeoutRef.current = window.setTimeout(() => {
           handleClose();
-        }, 2000);
+        }, 2500);
       },
       onConnect: () => {
         logger.debug('[Modal] WebSocket conectado');
@@ -74,7 +93,7 @@ export function CreateSaleModal({
       onDisconnect: () => {
         logger.debug('[Modal] WebSocket desconectado');
 
-        if (saleId && selectedMethod === 'pix' && pixQrCodeBase64 && !showSuccessAnimation) {
+        if (saleId && selectedMethod === 'pix' && pixQrCodeBase64 && currentStep === 'pixQr') {
           logger.debug('[Modal] Ativando polling fallback');
           startPollingFallback(saleId);
         }
@@ -85,13 +104,13 @@ export function CreateSaleModal({
     });
 
   useEffect(() => {
-    if (!formData.uuid && users.length > 0) {
+    if (!formData.uuid && sortedUsers.length > 0) {
       setFormData((prev) => ({
         ...prev,
-        uuid: users[0].uuid,
+        uuid: sortedUsers[0].uuid,
       }));
     }
-  }, [users, formData.uuid]);
+  }, [sortedUsers, formData.uuid]);
 
   useEffect(() => {
     return () => {
@@ -102,7 +121,7 @@ export function CreateSaleModal({
   }, []);
 
   useEffect(() => {
-    if (pixQrCodeBase64 && saleId && selectedMethod === 'pix') {
+    if (pixQrCodeBase64 && saleId && selectedMethod === 'pix' && currentStep === 'pixQr') {
       if (isConnected) {
         joinSale(saleId);
         stopPollingFallback();
@@ -118,27 +137,71 @@ export function CreateSaleModal({
     }
 
     return undefined;
-  }, [pixQrCodeBase64, saleId, selectedMethod, isConnected, joinSale, leaveSale, startPollingFallback, stopPollingFallback]);
+  }, [
+    pixQrCodeBase64,
+    saleId,
+    selectedMethod,
+    isConnected,
+    joinSale,
+    leaveSale,
+    startPollingFallback,
+    stopPollingFallback,
+    currentStep,
+  ]);
 
   const resetForm = () => {
+    setSelectedProducts({
+      branco: 0,
+      cinza: 0,
+      aluminio: 0,
+      preto: 0,
+    });
     setFormData({
-      quantity: 1,
-      uuid: users[0]?.uuid || '',
-      amount: UNIT_PRICE * 100,
+      products: [],
+      uuid: sortedUsers[0]?.uuid || '',
+      amount: 0,
       method: 'pix',
+      local: true,
     });
   };
 
-  const getUserPhoto = (user: User): string | null => {
-    const userWithPhoto = user as UserWithPhoto;
-    return (
-      userWithPhoto.avatarUrl ||
-      userWithPhoto.photoUrl ||
-      userWithPhoto.image ||
-      userWithPhoto.avatar ||
-      userWithPhoto.photo ||
-      null
-    );
+  const getTotalQuantity = () => {
+    return Object.values(selectedProducts).reduce((sum, qty) => sum + qty, 0);
+  };
+
+  const updateProductQuantity = (productName: string, newQuantity: number) => {
+    const safeQuantity = Math.max(0, newQuantity);
+    const newSelectedProducts = {
+      ...selectedProducts,
+      [productName]: safeQuantity,
+    };
+
+    setSelectedProducts(newSelectedProducts);
+
+    // Atualizar formData
+    const totalQuantity = Object.values(newSelectedProducts).reduce((sum, qty) => sum + qty, 0);
+    const totalAmount = totalQuantity * UNIT_PRICE * 100;
+    const isLocal = totalQuantity <= 12;
+    const productsArray: ProductSelection[] = Object.entries(newSelectedProducts)
+      .filter(([_, qty]) => qty > 0)
+      .map(([productName, quantity]) => {
+        const product = AVAILABLE_PRODUCTS.find(p => p.name === productName);
+        return { id: product!.id, quantity };
+      });
+
+    setFormData((prev) => ({
+      ...prev,
+      amount: totalAmount,
+      products: productsArray,
+      local: isLocal,
+    }));
+
+    logger.debug('[Modal] Produtos atualizados', {
+      products: newSelectedProducts,
+      totalQuantity,
+      totalAmount,
+      local: isLocal,
+    });
   };
 
   const getInitials = (name: string) => {
@@ -148,39 +211,97 @@ export function CreateSaleModal({
     return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
   };
 
-  const selectedUserIndex = users.findIndex((user) => user.uuid === formData.uuid);
+  const buildModalAvatarCandidates = useCallback((user: User) => {
+    const candidates = buildAvatarCandidates(user);
+    const resolved = getResolvedAvatarUrl(user.uuid);
+
+    if (resolved && candidates.includes(resolved)) {
+      return [resolved, ...candidates.filter((candidate) => candidate !== resolved)];
+    }
+
+    return candidates;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const preloadUsersAvatars = async () => {
+      if (cancelled || sortedUsers.length === 0) {
+        return;
+      }
+
+      await preloadAvatarsForUsers(sortedUsers);
+    };
+
+    preloadUsersAvatars();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sortedUsers]);
+
+  const selectedUserIndex = sortedUsers.findIndex((user) => user.uuid === formData.uuid);
   const safeUserIndex = selectedUserIndex >= 0 ? selectedUserIndex : 0;
-  const selectedUser = users[safeUserIndex];
+  const selectedUser = sortedUsers[safeUserIndex];
+  const selectedUserAvatarCandidates = useMemo(() => {
+    if (!selectedUser) return [] as string[];
+
+    return buildModalAvatarCandidates(selectedUser);
+  }, [selectedUser, buildModalAvatarCandidates]);
+  const selectedUserCandidatesSignature = selectedUserAvatarCandidates.join('|');
+
+  useEffect(() => {
+    if (!selectedUser) {
+      setSelectedUserAvatarIndex(0);
+      setSelectedUserAvatarSrc(null);
+      return;
+    }
+
+    const cachedUrl = getResolvedAvatarUrl(selectedUser.uuid);
+    if (cachedUrl && selectedUserAvatarCandidates.includes(cachedUrl)) {
+      setSelectedUserAvatarIndex(selectedUserAvatarCandidates.indexOf(cachedUrl));
+      setSelectedUserAvatarSrc(cachedUrl);
+      return;
+    }
+
+    setSelectedUserAvatarIndex(0);
+    setSelectedUserAvatarSrc(selectedUserAvatarCandidates[0] || null);
+  }, [selectedUser?.uuid, selectedUserCandidatesSignature]);
+
+  const handleSelectedUserAvatarError = () => {
+    const nextIndex = selectedUserAvatarIndex + 1;
+    if (nextIndex < selectedUserAvatarCandidates.length) {
+      setSelectedUserAvatarIndex(nextIndex);
+      setSelectedUserAvatarSrc(selectedUserAvatarCandidates[nextIndex]);
+      return;
+    }
+
+    const fallbackUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+      selectedUser?.name || 'User'
+    )}&backgroundColor=BCCF00&textColor=000000`;
+    setSelectedUserAvatarSrc(fallbackUrl);
+  };
+
+  const handleSelectedUserAvatarLoad = () => {
+    if (selectedUser && selectedUserAvatarSrc) {
+      rememberResolvedAvatarUrl(selectedUser.uuid, selectedUserAvatarSrc);
+    }
+  };
 
   const goToPreviousUser = () => {
     if (safeUserIndex <= 0) return;
-    const prevUser = users[safeUserIndex - 1];
+    const prevUser = sortedUsers[safeUserIndex - 1];
     if (prevUser) {
       setFormData((prev) => ({ ...prev, uuid: prevUser.uuid }));
     }
   };
 
   const goToNextUser = () => {
-    if (safeUserIndex >= users.length - 1) return;
-    const nextUser = users[safeUserIndex + 1];
+    if (safeUserIndex >= sortedUsers.length - 1) return;
+    const nextUser = sortedUsers[safeUserIndex + 1];
     if (nextUser) {
       setFormData((prev) => ({ ...prev, uuid: nextUser.uuid }));
     }
-  };
-
-  const updateQuantity = (quantity: number) => {
-    const safeQuantity = Math.max(1, quantity);
-    const calculatedAmountCents = safeQuantity * UNIT_PRICE * 100;
-    logger.debug('[Modal] Quantidade/valor recalculados', {
-      quantity: safeQuantity,
-      amountCents: calculatedAmountCents,
-      amountBRL: (calculatedAmountCents / 100).toFixed(2),
-    });
-    setFormData((prev) => ({
-      ...prev,
-      quantity: safeQuantity,
-      amount: calculatedAmountCents,
-    }));
   };
 
   const handleClose = () => {
@@ -197,29 +318,53 @@ export function CreateSaleModal({
 
     setPixQrCodeBase64(null);
     setError(null);
-    setCurrentStep('form');
+    setCurrentStep('seller');
     setSelectedMethod(null);
     setSaleId(null);
-    setShowSuccessAnimation(false);
     resetForm();
     onClose();
   };
 
-  const handleContinue = (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateSellerAndQuantity = () => {
+    if (!formData.uuid) {
+      setError('Selecione um vendedor');
+      return false;
+    }
 
+    if (getTotalQuantity() <= 0) {
+      setError('Quantidade deve ser maior que 0');
+      return false;
+    }
+
+    if (formData.amount <= 0) {
+      setError('Valor deve ser maior que 0');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSellerNext = () => {
     if (!formData.uuid) {
       setError('Selecione um vendedor');
       return;
     }
 
-    if (formData.quantity <= 0) {
-      setError('Quantidade deve ser maior que 0');
+    setError(null);
+    setCurrentStep('quantity');
+  };
+
+  const handleQuantityNext = () => {
+    if (!validateSellerAndQuantity()) {
       return;
     }
 
-    if (formData.amount <= 0) {
-      setError('Valor deve ser maior que 0');
+    setError(null);
+    setCurrentStep('summary');
+  };
+
+  const handleSummaryNext = () => {
+    if (!validateSellerAndQuantity()) {
       return;
     }
 
@@ -245,21 +390,18 @@ export function CreateSaleModal({
 
       if (method === 'pix') {
         setPixQrCodeBase64(result.brCodeBase64);
-        setShowSuccessAnimation(false);
-        setCurrentStep('result');
+        setCurrentStep('pixQr');
       } else {
         setPixQrCodeBase64(null);
-        setCurrentStep('result');
-        setShowSuccessAnimation(true);
+        setCurrentStep('confirmation');
 
         onLeaderboardUpdate?.();
+        onStockUpdate?.();
 
         autoCloseTimeoutRef.current = window.setTimeout(() => {
           handleClose();
         }, 2500);
       }
-
-      resetForm();
     } catch (err: any) {
       logger.error('[Modal] Erro ao criar venda');
       logger.debug('[Modal] Resposta de erro:', err.response?.data);
@@ -314,170 +456,306 @@ export function CreateSaleModal({
 
               <div className="p-6 sm:p-8">
                 <AnimatePresence mode="wait">
-                  {currentStep === 'form' && (
+                  {currentStep === 'seller' && (
                     <motion.div
-                      key="form-step"
-                      initial={{ opacity: 0, x: -50 }}
+                      key="seller-step"
+                      initial={{ opacity: 0, x: -40 }}
                       animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -50 }}
+                      exit={{ opacity: 0, x: -40 }}
                       transition={{ duration: 0.3 }}
+                      className="space-y-4"
                     >
-                      <form onSubmit={handleContinue} className="space-y-4">
-                        <div>
-                          <label className="block text-sm text-hm-gray-400 mb-2">Vendedor *</label>
-                          {users.length === 0 ? (
-                            <div className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 rounded-hm text-hm-gray-400 text-base flex items-center">
-                              Nenhum vendedor disponível
-                            </div>
-                          ) : (
-                            <>
-                              <div className="flex items-center gap-3">
-                                <button
-                                  type="button"
-                                  onClick={goToPreviousUser}
-                                  disabled={isSubmitting || isLoading || safeUserIndex === 0}
-                                  className="min-h-[56px] min-w-[56px] rounded-hm bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 text-2xl font-bold disabled:opacity-40 hover:bg-hm-green/10 transition"
-                                  aria-label="Vendedor anterior"
-                                >
-                                  ‹
-                                </button>
+                      <p className="text-hm-gray-400 text-xs uppercase tracking-widest">Etapa 1 de 6</p>
+                      <h3 className="font-display text-lg font-black text-hm-gray-700 uppercase tracking-tight">
+                        Selecionar vendedor
+                      </h3>
 
-                                <div className="flex-1 relative min-h-[110px]">
-                                  <AnimatePresence mode="wait">
-                                    <motion.button
-                                      key={selectedUser?.uuid || 'empty'}
-                                      initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                                      exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                      transition={{ duration: 0.2, ease: 'easeInOut' }}
-                                      type="button"
-                                      disabled={isSubmitting || isLoading}
-                                      className="absolute inset-0 w-full min-h-[110px] p-3 rounded-hm border border-hm-green bg-hm-green/20 text-left disabled:opacity-50"
-                                    >
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-12 h-12 rounded-full overflow-hidden bg-hm-green/20 flex items-center justify-center text-hm-gray-700 font-bold flex-shrink-0">
-                                          {selectedUser && getUserPhoto(selectedUser) ? (
-                                            <img
-                                              src={getUserPhoto(selectedUser) as string}
-                                              alt={selectedUser.name}
-                                              className="w-full h-full object-cover"
-                                            />
-                                          ) : (
-                                            <span>{getInitials(selectedUser?.name || 'Vendedor')}</span>
-                                          )}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <p className="text-hm-gray-700 text-base font-semibold truncate">
-                                            {selectedUser?.name || 'Vendedor'}
-                                          </p>
-                                          <p className="text-hm-gray-400 text-xs truncate">
-                                            {selectedUser?.sector || 'Vendedor'}
-                                          </p>
-                                        </div>
-                                      </div>
-                                    </motion.button>
-                                  </AnimatePresence>
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={goToNextUser}
-                                  disabled={isSubmitting || isLoading || safeUserIndex >= users.length - 1}
-                                  className="min-h-[56px] min-w-[56px] rounded-hm bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 text-2xl font-bold disabled:opacity-40 hover:bg-hm-green/10 transition"
-                                  aria-label="Próximo vendedor"
-                                >
-                                  ›
-                                </button>
-                              </div>
-
-                              <div className="mt-2 text-center text-xs text-hm-gray-400">
-                                {safeUserIndex + 1} de {users.length}
-                              </div>
-                            </>
-                          )}
+                      {sortedUsers.length === 0 ? (
+                        <div className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 rounded-hm text-hm-gray-400 text-base flex items-center">
+                          Nenhum vendedor disponível
                         </div>
-
-                        <div>
-                          <label className="block text-sm text-hm-gray-400 mb-2">Quantidade *</label>
+                      ) : (
+                        <>
                           <div className="flex items-center gap-3">
                             <button
                               type="button"
-                              onClick={() => updateQuantity(formData.quantity - 1)}
-                              disabled={isSubmitting || formData.quantity <= 1}
-                              className="min-h-[56px] min-w-[56px] rounded-hm bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 text-2xl font-bold disabled:opacity-40"
+                              onClick={goToPreviousUser}
+                              disabled={isSubmitting || isLoading || safeUserIndex === 0}
+                              className="min-h-[56px] min-w-[56px] rounded-hm bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 text-2xl font-bold disabled:opacity-40 hover:bg-hm-green/10 transition"
+                              aria-label="Vendedor anterior"
                             >
-                              -
+                              ‹
                             </button>
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              inputMode="numeric"
-                              value={formData.quantity}
-                              onChange={(e) => updateQuantity(parseInt(e.target.value) || 1)}
-                              disabled={isSubmitting}
-                              className="w-full min-h-[56px] px-3 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 rounded-hm text-hm-gray-700 text-2xl text-center font-bold focus:outline-none focus:border-hm-green disabled:opacity-50"
-                            />
+
+                            <div className="flex-1 relative min-h-[110px]">
+                              <AnimatePresence mode="wait">
+                                <motion.button
+                                  key={selectedUser?.uuid || 'empty'}
+                                  initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                                  exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                                  type="button"
+                                  disabled={isSubmitting || isLoading}
+                                  className="absolute inset-0 w-full min-h-[110px] p-3 rounded-hm border border-hm-green bg-hm-green/20 text-left disabled:opacity-50"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full overflow-hidden flex items-center justify-center text-hm-gray-700 font-bold flex-shrink-0 ${
+                                      selectedUserAvatarSrc?.includes('dicebear.com') ? 'border-2 border-hm-green' : ''
+                                    }`}>
+                                      {selectedUser && selectedUserAvatarSrc ? (
+                                        <img
+                                          src={selectedUserAvatarSrc}
+                                          alt={selectedUser.name}
+                                          className="w-full h-full object-cover"
+                                          loading="eager"
+                                          decoding="async"
+                                          onError={handleSelectedUserAvatarError}
+                                          onLoad={handleSelectedUserAvatarLoad}
+                                        />
+                                      ) : (
+                                        <span>{getInitials(selectedUser?.name || 'Vendedor')}</span>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-hm-gray-700 text-base font-semibold truncate">
+                                        {selectedUser?.name || 'Vendedor'}
+                                      </p>
+                                      <p className="text-hm-gray-400 text-xs truncate">
+                                        {selectedUser?.sector || 'Vendedor'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </motion.button>
+                              </AnimatePresence>
+                            </div>
+
                             <button
                               type="button"
-                              onClick={() => updateQuantity(formData.quantity + 1)}
-                              disabled={isSubmitting}
-                              className="min-h-[56px] min-w-[56px] rounded-hm bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 text-2xl font-bold disabled:opacity-40"
+                              onClick={goToNextUser}
+                              disabled={isSubmitting || isLoading || safeUserIndex >= sortedUsers.length - 1}
+                              className="min-h-[56px] min-w-[56px] rounded-hm bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 text-2xl font-bold disabled:opacity-40 hover:bg-hm-green/10 transition"
+                              aria-label="Próximo vendedor"
                             >
-                              +
+                              ›
                             </button>
                           </div>
-                          <div className="mt-3 grid grid-cols-5 gap-2">
-                            {QUICK_QUANTITIES.map((quantity) => (
-                              <button
-                                key={quantity}
-                                type="button"
-                                onClick={() => updateQuantity(quantity)}
-                                disabled={isSubmitting}
-                                className={`min-h-[48px] rounded-hm border text-base font-semibold transition ${
-                                  formData.quantity === quantity
-                                    ? 'bg-hm-green text-hm-black border-hm-green'
-                                    : 'bg-hm-gray-100 text-hm-gray-700 border-hm-green border-opacity-20'
-                                }`}
-                              >
-                                {quantity}
-                              </button>
-                            ))}
+
+                          <div className="mt-2 text-center text-xs text-hm-gray-400">
+                            {safeUserIndex + 1} de {sortedUsers.length}
                           </div>
+                        </>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
+                        <button
+                          type="button"
+                          onClick={handleClose}
+                          disabled={isSubmitting}
+                          className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 rounded-hm text-lg font-semibold hover:bg-hm-gray-100 hover:border-opacity-40 transition disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSellerNext}
+                          disabled={isSubmitting || isLoading || sortedUsers.length === 0}
+                          className="w-full min-h-[56px] px-4 py-3 bg-hm-green text-hm-black rounded-hm text-lg font-bold hover:bg-hm-green-hover transition disabled:opacity-50 uppercase tracking-wide"
+                        >
+                          Continuar
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {currentStep === 'quantity' && (
+                    <motion.div
+                      key="quantity-step"
+                      initial={{ opacity: 0, x: 40 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -40 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                      className="space-y-4"
+                    >
+                      <p className="text-hm-gray-400 text-xs uppercase tracking-widest">Etapa 2 de 6</p>
+                      <h3 className="font-display text-lg font-black text-hm-gray-700 uppercase tracking-tight">
+                        Selecionar Produtos
+                      </h3>
+
+                      <div className="bg-hm-gray-100/40 border border-hm-green/20 rounded p-3 flex items-center justify-between">
+                        <span className="text-sm text-hm-gray-600 font-display uppercase">Total</span>
+                        <span className="text-lg font-bold text-hm-gray-700">
+                          {getTotalQuantity()}
+                        </span>
+                      </div>
+
+                      <div className="space-y-3">
+                        {AVAILABLE_PRODUCTS.map((product) => (
+                          <div
+                            key={product.name}
+                            className="bg-hm-bg-light border border-hm-gray-400/20 rounded p-4 hover:border-hm-green/40 transition-colors"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="w-5 h-5 rounded-full border-2"
+                                  style={{
+                                    backgroundColor: product.color,
+                                    borderColor: product.borderColor,
+                                  }}
+                                ></div>
+                                <span className="text-hm-gray-700 font-semibold text-base">
+                                  {product.displayName}
+                                </span>
+                              </div>
+                              <span className="text-hm-gray-400 text-sm">
+                                R$ {UNIT_PRICE.toFixed(2)}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => updateProductQuantity(product.name, selectedProducts[product.name] - 1)}
+                                disabled={isSubmitting || selectedProducts[product.name] <= 0}
+                                className="min-h-[44px] min-w-[44px] rounded bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 font-bold disabled:opacity-30 hover:bg-hm-green/10 transition flex items-center justify-center"
+                              >
+                                <Minus className="w-4 h-4" />
+                              </button>
+
+                              <div className="flex-1 text-center">
+                                <span className="text-2xl font-black text-hm-gray-700">
+                                  {selectedProducts[product.name]}
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => updateProductQuantity(product.name, selectedProducts[product.name] + 1)}
+                                disabled={isSubmitting}
+                                className="min-h-[44px] min-w-[44px] rounded bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 font-bold disabled:opacity-30 hover:bg-hm-green/10 transition flex items-center justify-center"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="bg-hm-gray-100/40 border border-hm-green/20 rounded p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-hm-gray-600 font-display uppercase text-sm">Valor Total</span>
+                          <span className="text-hm-green font-display text-2xl font-black">
+                            R$ {(formData.amount / 100).toFixed(2)}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs text-hm-gray-400">Valor unitário: R$ {UNIT_PRICE.toFixed(2)}</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
+                        <button
+                          type="button"
+                          onClick={() => setCurrentStep('seller')}
+                          disabled={isSubmitting}
+                          className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 rounded-hm text-lg font-semibold hover:bg-hm-gray-100 hover:border-opacity-40 transition disabled:opacity-50"
+                        >
+                          Voltar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleQuantityNext}
+                          disabled={isSubmitting || getTotalQuantity() === 0}
+                          className="w-full min-h-[56px] px-4 py-3 bg-hm-green text-hm-black rounded-hm text-lg font-bold hover:bg-hm-green-hover transition disabled:opacity-50 uppercase tracking-wide"
+                        >
+                          Continuar
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {currentStep === 'summary' && (
+                    <motion.div
+                      key="summary-step"
+                      initial={{ opacity: 0, x: 40 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -40 }}
+                      transition={{ duration: 0.3, ease: 'easeInOut' }}
+                      className="space-y-4"
+                    >
+                      <p className="text-hm-gray-400 text-xs uppercase tracking-widest">Etapa 3 de 6</p>
+                      <h3 className="font-display text-lg font-black text-hm-gray-700 uppercase tracking-tight">
+                        Resumo da transação
+                      </h3>
+
+                      <div className="border border-hm-green/20 rounded-hm p-4 space-y-3 bg-hm-gray-100/40">
+                        <div className="pb-3 border-b border-hm-gray-400/20">
+                          <p className="text-hm-gray-700 font-semibold text-base">
+                            Vendedor: {selectedUser?.name || '-'}
+                          </p>
                         </div>
 
-                        <div>
-                          <label className="block text-sm text-hm-gray-400 mb-2">Valor (R$) *</label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={(formData.amount / 100).toFixed(2)}
-                            readOnly
-                            disabled
-                            className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 rounded-hm text-hm-gray-700 text-2xl text-center font-bold focus:outline-none disabled:opacity-70"
-                          />
-                          <p className="mt-2 text-sm text-hm-gray-400">Valor unitário: R$ {UNIT_PRICE.toFixed(2)}</p>
+                        <div className="space-y-2">
+                          <p className="text-hm-gray-600 text-xs uppercase tracking-wide font-display">Produtos:</p>
+                          {Object.entries(selectedProducts)
+                            .filter(([_, qty]) => qty > 0)
+                            .map(([productName, qty]) => {
+                              const productInfo = AVAILABLE_PRODUCTS.find(p => p.name === productName);
+                              return (
+                                <div key={productName} className="flex items-center justify-between py-1">
+                                  <div className="flex items-center gap-2">
+                                    <div
+                                      className="w-4 h-4 rounded-full border-2"
+                                      style={{
+                                        backgroundColor: productInfo?.color || '#BCCF00',
+                                        borderColor: productInfo?.borderColor || 'transparent',
+                                      }}
+                                    ></div>
+                                    <span className="text-hm-gray-700 font-medium">
+                                      {productInfo?.displayName || productName}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-hm-gray-600 text-sm">{qty}x</span>
+                                    <span className="text-hm-gray-700 font-semibold">
+                                      R$ {(qty * UNIT_PRICE).toFixed(2)}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
-                          <button
-                            type="button"
-                            onClick={handleClose}
-                            disabled={isSubmitting}
-                            className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 rounded-hm text-lg font-semibold hover:bg-hm-gray-100 hover:border-opacity-40 transition disabled:opacity-50"
-                          >
-                            Cancelar
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={isSubmitting || isLoading || users.length === 0}
-                            className="w-full min-h-[56px] px-4 py-3 bg-hm-green text-hm-black rounded-hm text-lg font-bold hover:bg-hm-green-hover transition disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-wide"
-                          >
-                            CONTINUAR
-                          </button>
+                        <div className="pt-3 border-t border-hm-gray-400/20">
+                          <div className="flex items-center justify-between">
+                            <span className="text-hm-gray-600 font-display uppercase text-sm">Total</span>
+                            <span className="text-hm-green font-display text-2xl font-black">
+                              R$ {(formData.amount / 100).toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-hm-gray-500 text-xs mt-1">
+                            {getTotalQuantity()} {getTotalQuantity() === 1 ? 'produto' : 'produtos'}
+                          </p>
                         </div>
-                      </form>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4">
+                        <button
+                          type="button"
+                          onClick={() => setCurrentStep('quantity')}
+                          disabled={isSubmitting}
+                          className="w-full min-h-[56px] px-4 py-3 bg-hm-gray-100 border border-hm-green border-opacity-20 text-hm-gray-700 rounded-hm text-lg font-semibold hover:bg-hm-gray-100 hover:border-opacity-40 transition disabled:opacity-50"
+                        >
+                          Voltar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSummaryNext}
+                          disabled={isSubmitting}
+                          className="w-full min-h-[56px] px-4 py-3 bg-hm-green text-hm-black rounded-hm text-lg font-bold hover:bg-hm-green-hover transition disabled:opacity-50 uppercase tracking-wide"
+                        >
+                          Continuar
+                        </button>
+                      </div>
                     </motion.div>
                   )}
 
@@ -490,15 +768,7 @@ export function CreateSaleModal({
                       transition={{ duration: 0.3, ease: 'easeInOut' }}
                       className="flex flex-col gap-4"
                     >
-                      <div className="text-center border-b border-hm-green/20 pb-4">
-                        <p className="text-hm-gray-400 text-xs uppercase tracking-widest mb-1">Resumo da venda</p>
-                        <p className="text-hm-gray-700 font-bold text-base">
-                          {selectedUser?.name} — {formData.quantity} {formData.quantity === 1 ? 'produto' : 'produtos'}
-                        </p>
-                        <p className="text-hm-green font-display text-2xl font-black mt-1">
-                          R$ {(formData.amount / 100).toFixed(2)}
-                        </p>
-                      </div>
+                      <p className="text-hm-gray-400 text-xs uppercase tracking-widest">Etapa 4 de 6</p>
 
                       <h3 className="font-display text-lg font-black text-hm-gray-700 uppercase tracking-tight text-center">
                         Método de Pagamento
@@ -515,10 +785,7 @@ export function CreateSaleModal({
                           <Loader2 className="w-6 h-6 animate-spin" />
                         ) : (
                           <>
-                            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M13.17 10.83l-1.41-1.41a4 4 0 00-5.66 0l-1.41 1.41a4 4 0 000 5.66l1.41 1.41" />
-                              <path d="M10.83 13.17l1.41 1.41a4 4 0 005.66 0l1.41-1.41a4 4 0 000-5.66l-1.41-1.41" />
-                            </svg>
+                            <img src="/icons/pix.svg" alt="Ícone PIX" className="w-8 h-8" />
                             <span>PIX</span>
                             <span className="text-xs font-normal opacity-70 normal-case tracking-normal">
                               Gerar QR Code para pagamento
@@ -553,118 +820,61 @@ export function CreateSaleModal({
 
                       <button
                         type="button"
-                        onClick={() => setCurrentStep('form')}
+                        onClick={() => setCurrentStep('summary')}
                         disabled={isSubmitting}
                         className="w-full min-h-[48px] px-4 py-3 text-hm-gray-400 text-sm font-semibold hover:text-hm-gray-700 transition uppercase tracking-wide disabled:opacity-50"
                       >
-                        ← Voltar ao formulário
+                        ← Voltar ao resumo
                       </button>
                     </motion.div>
                   )}
 
-                  {currentStep === 'result' && (
+                  {currentStep === 'pixQr' && (
                     <motion.div
-                      key="result-step"
-                      initial={{ opacity: 0, scale: 0.9 }}
+                      key="pix-step"
+                      initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      transition={{ duration: 0.4, ease: 'easeOut' }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.3, ease: 'easeOut' }}
                       className="flex flex-col items-center"
                     >
-                      {selectedMethod === 'pix' && pixQrCodeBase64 && (
+                      <p className="text-hm-gray-400 text-xs uppercase tracking-widest mb-3">Etapa 5 de 6</p>
+
+                      {pixQrCodeBase64 ? (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           className="border border-hm-green border-opacity-20 rounded-hm p-4 flex flex-col items-center w-full"
                         >
-                          {showSuccessAnimation ? (
-                            <motion.div
-                              initial={{ opacity: 0, scale: 0.5 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              transition={{ duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
-                              className="flex flex-col items-center py-8"
-                            >
-                              <motion.div
-                                initial={{ scale: 0, rotate: -180 }}
-                                animate={{ scale: 1, rotate: 0 }}
-                                transition={{ delay: 0.2, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
-                                className="w-24 h-24 rounded-full bg-hm-green flex items-center justify-center mb-6"
-                              >
-                                <motion.svg
-                                  className="w-12 h-12 text-hm-black"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="3"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <motion.path
-                                    d="M5 13l4 4L19 7"
-                                    initial={{ pathLength: 0 }}
-                                    animate={{ pathLength: 1 }}
-                                    transition={{ delay: 0.6, duration: 0.4 }}
-                                  />
-                                </motion.svg>
-                              </motion.div>
+                          <h3 className="font-display text-xl font-bold text-hm-gray-700 mb-3">QR Code do PIX</h3>
+                          <img
+                            src={pixQrCodeBase64}
+                            alt="QR Code PIX"
+                            className="w-full max-w-[320px] aspect-square rounded-hm bg-white p-2"
+                          />
 
-                              <motion.h3
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.4 }}
-                                className="font-display text-2xl font-black text-hm-green uppercase tracking-tight"
-                              >
-                                Pagamento Confirmado!
-                              </motion.h3>
+                          <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: 0.5 }}
+                            className={`mt-3 px-3 py-2 rounded text-xs uppercase tracking-wide font-semibold ${
+                              isConnected
+                                ? 'bg-green-100 text-green-800 border border-green-300'
+                                : 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                            }`}
+                          >
+                            {isConnected ? '✓ Escutando pagamento...' : '⚠ Reconectando... (polling ativo)'}
+                          </motion.div>
 
-                              <motion.p
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.6 }}
-                                className="text-hm-gray-400 text-sm mt-2 uppercase tracking-wide"
-                              >
-                                Venda registrada com sucesso
-                              </motion.p>
-                            </motion.div>
-                          ) : (
-                            <>
-                              <h3 className="font-display text-xl font-bold text-hm-gray-700 mb-3">
-                                QR Code do PIX
-                              </h3>
-                              <img
-                                src={pixQrCodeBase64}
-                                alt="QR Code PIX"
-                                className="w-full max-w-[320px] aspect-square rounded-hm bg-white p-2"
-                              />
-
-                              <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                transition={{ delay: 0.5 }}
-                                className={`mt-3 px-3 py-2 rounded text-xs uppercase tracking-wide font-semibold ${
-                                  isConnected
-                                    ? 'bg-green-100 text-green-800 border border-green-300'
-                                    : 'bg-yellow-100 text-yellow-800 border border-yellow-300'
-                                }`}
-                              >
-                                {isConnected
-                                  ? '✓ Escutando pagamento...'
-                                  : '⚠ Reconectando... (polling ativo)'}
-                              </motion.div>
-
-                              <button
-                                type="button"
-                                onClick={handleClose}
-                                className="mt-4 w-full max-w-[320px] min-h-[56px] px-4 py-3 bg-hm-green text-hm-black rounded-hm text-lg font-bold hover:bg-hm-green-hover transition uppercase tracking-wide"
-                              >
-                                Fechar
-                              </button>
-                            </>
-                          )}
+                          <button
+                            type="button"
+                            onClick={handleClose}
+                            className="mt-4 w-full max-w-[320px] min-h-[56px] px-4 py-3 bg-hm-green text-hm-black rounded-hm text-lg font-bold hover:bg-hm-green-hover transition uppercase tracking-wide"
+                          >
+                            Fechar
+                          </button>
                         </motion.div>
-                      )}
-
-                      {selectedMethod === 'pix' && !pixQrCodeBase64 && (
+                      ) : (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
@@ -683,78 +893,89 @@ export function CreateSaleModal({
                           </button>
                         </motion.div>
                       )}
+                    </motion.div>
+                  )}
 
-                      {selectedMethod === 'dinheiro' && (
+                  {currentStep === 'confirmation' && (
+                    <motion.div
+                      key="confirmation-step"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ duration: 0.4, ease: 'easeOut' }}
+                      className="flex flex-col items-center"
+                    >
+                      <p className="text-hm-gray-400 text-xs uppercase tracking-widest mb-3">Etapa 6 de 6</p>
+
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+                        className="flex flex-col items-center py-8"
+                      >
                         <motion.div
-                          initial={{ opacity: 0, scale: 0.5 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
-                          className="flex flex-col items-center py-8"
+                          initial={{ scale: 0, rotate: -180 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          transition={{ delay: 0.2, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
+                          className="w-24 h-24 rounded-full bg-hm-green flex items-center justify-center mb-6"
                         >
-                          <motion.div
-                            initial={{ scale: 0, rotate: -180 }}
-                            animate={{ scale: 1, rotate: 0 }}
-                            transition={{ delay: 0.2, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
-                            className="w-24 h-24 rounded-full bg-hm-green flex items-center justify-center mb-6"
+                          <motion.svg
+                            initial={{ pathLength: 0 }}
+                            animate={{ pathLength: 1 }}
+                            transition={{ delay: 0.5, duration: 0.4 }}
+                            className="w-12 h-12 text-hm-black"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
                           >
-                            <motion.svg
+                            <motion.path
+                              d="M5 13l4 4L19 7"
                               initial={{ pathLength: 0 }}
                               animate={{ pathLength: 1 }}
-                              transition={{ delay: 0.5, duration: 0.4 }}
-                              className="w-12 h-12 text-hm-black"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <motion.path
-                                d="M5 13l4 4L19 7"
-                                initial={{ pathLength: 0 }}
-                                animate={{ pathLength: 1 }}
-                                transition={{ delay: 0.6, duration: 0.4 }}
-                              />
-                            </motion.svg>
-                          </motion.div>
-
-                          <motion.h3
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.4 }}
-                            className="font-display text-2xl font-black text-hm-green uppercase tracking-tight"
-                          >
-                            Venda Registrada!
-                          </motion.h3>
-
-                          <motion.p
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.6 }}
-                            className="text-hm-gray-400 text-sm mt-2 uppercase tracking-wide"
-                          >
-                            Pagamento em dinheiro confirmado
-                          </motion.p>
-
-                          <motion.div className="w-48 h-1 bg-hm-gray-100 rounded-full mt-6 overflow-hidden">
-                            <motion.div
-                              initial={{ width: '100%' }}
-                              animate={{ width: '0%' }}
-                              transition={{ duration: 2.5, ease: 'linear' }}
-                              className="h-full bg-hm-green rounded-full"
+                              transition={{ delay: 0.6, duration: 0.4 }}
                             />
-                          </motion.div>
-
-                          <motion.p
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ delay: 0.8 }}
-                            className="text-hm-gray-400 text-xs mt-2"
-                          >
-                            Fechando automaticamente...
-                          </motion.p>
+                          </motion.svg>
                         </motion.div>
-                      )}
+
+                        <motion.h3
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.4 }}
+                          className="font-display text-2xl font-black text-hm-green uppercase tracking-tight"
+                        >
+                          Venda Registrada!
+                        </motion.h3>
+
+                        <motion.p
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.6 }}
+                          className="text-hm-gray-400 text-sm mt-2 uppercase tracking-wide"
+                        >
+                          {selectedMethod === 'pix' ? 'Pagamento PIX confirmado' : 'Pagamento em dinheiro confirmado'}
+                        </motion.p>
+
+                        <motion.div className="w-48 h-1 bg-hm-gray-100 rounded-full mt-6 overflow-hidden">
+                          <motion.div
+                            initial={{ width: '100%' }}
+                            animate={{ width: '0%' }}
+                            transition={{ duration: 2.5, ease: 'linear' }}
+                            className="h-full bg-hm-green rounded-full"
+                          />
+                        </motion.div>
+
+                        <motion.p
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.8 }}
+                          className="text-hm-gray-400 text-xs mt-2"
+                        >
+                          Fechando automaticamente...
+                        </motion.p>
+                      </motion.div>
                     </motion.div>
                   )}
                 </AnimatePresence>

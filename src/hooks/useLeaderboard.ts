@@ -64,12 +64,11 @@ export function useLeaderboard(): UseLeaderboardReturn {
           };
         })
         .sort((a, b) => {
-          // Ordenar por totalSales decrescente
           if (b.totalSales !== a.totalSales) {
             return b.totalSales - a.totalSales;
           }
-          // Desempate por totalRevenue
-          return b.totalRevenue - a.totalRevenue;
+
+          return a.user.name.localeCompare(b.user.name, 'pt-BR', { sensitivity: 'base' });
         })
         .map((entry, index) => ({
           ...entry,

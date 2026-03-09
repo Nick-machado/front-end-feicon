@@ -1,20 +1,166 @@
 import { motion } from 'framer-motion';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { LeaderboardPodium } from './components/LeaderboardPodium';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { CreateSaleModal } from './components/CreateSaleModal';
+import { StockMetrics } from './components/StockMetrics';
 import { useLeaderboard } from './hooks/useLeaderboard';
 import { useUsers } from './hooks/useUsers';
-import { CreateSalePayload } from './types/api';
+import { useStock } from './hooks/useStock';
+import { CreateSalePayload, User } from './types/api';
 import { saleService } from './services/saleService';
+import { hasResolvedAvatarUrl, preloadAvatarsForUsers } from './lib/avatar';
 import './index.css';
 
 function App() {
   const { leaderboard, isLoading: leaderboardLoading, error: leaderboardError, refetch: refetchLeaderboard } = useLeaderboard();
-  const { users } = useUsers();
+  const { users, isLoading: usersLoading } = useUsers();
+  const { stock, isLoading: stockLoading, refetch: refetchStock } = useStock();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAvatarPreloading, setIsAvatarPreloading] = useState(true);
+  const dragScrollSensitivity = 2.2;
+  const dragScrollState = useRef({
+    isDragging: false,
+    pointerId: -1,
+    lastX: 0,
+    lastY: 0,
+  });
 
-  const isLoading = leaderboardLoading;
+  const usersForAvatarPreload = useMemo(() => {
+    const merged = new Map<string, User>();
+
+    users.forEach((user) => {
+      merged.set(user.uuid, user);
+    });
+
+    leaderboard.forEach((entry) => {
+      merged.set(entry.user.uuid, entry.user);
+    });
+
+    return Array.from(merged.values());
+  }, [users, leaderboard]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const preload = async () => {
+      if (leaderboardLoading || usersLoading) {
+        return;
+      }
+
+      if (usersForAvatarPreload.length === 0) {
+        if (!cancelled) {
+          setIsAvatarPreloading(false);
+        }
+        return;
+      }
+
+      const allResolved = usersForAvatarPreload.every((user) => hasResolvedAvatarUrl(user.uuid));
+      if (allResolved) {
+        if (!cancelled) {
+          setIsAvatarPreloading(false);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        setIsAvatarPreloading(true);
+      }
+
+      await preloadAvatarsForUsers(usersForAvatarPreload);
+
+      if (!cancelled) {
+        setIsAvatarPreloading(false);
+      }
+    };
+
+    preload();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leaderboardLoading, usersLoading, usersForAvatarPreload]);
+
+  useEffect(() => {
+    const isInteractiveElement = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) {
+        return false;
+      }
+
+      return Boolean(
+        target.closest('input, textarea, select, button, a, label, [role="button"], [contenteditable="true"], [data-drag-scroll="off"]'),
+      );
+    };
+
+    const stopDragging = () => {
+      if (!dragScrollState.current.isDragging) {
+        return;
+      }
+
+      dragScrollState.current.isDragging = false;
+      dragScrollState.current.pointerId = -1;
+      document.body.classList.remove('drag-scroll-active');
+      document.documentElement.classList.remove('drag-scroll-active');
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || event.button !== 0 || isInteractiveElement(event.target)) {
+        return;
+      }
+
+      dragScrollState.current.isDragging = true;
+      dragScrollState.current.pointerId = event.pointerId;
+      dragScrollState.current.lastX = event.clientX;
+      dragScrollState.current.lastY = event.clientY;
+      document.body.classList.add('drag-scroll-active');
+      document.documentElement.classList.add('drag-scroll-active');
+      event.preventDefault();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragScrollState.current.isDragging || dragScrollState.current.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const deltaX = event.clientX - dragScrollState.current.lastX;
+      const deltaY = event.clientY - dragScrollState.current.lastY;
+
+      window.scrollBy({
+        left: -deltaX * dragScrollSensitivity,
+        top: -deltaY * dragScrollSensitivity,
+      });
+
+      dragScrollState.current.lastX = event.clientX;
+      dragScrollState.current.lastY = event.clientY;
+      event.preventDefault();
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (dragScrollState.current.pointerId !== event.pointerId) {
+        return;
+      }
+
+      stopDragging();
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, { passive: false });
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    window.addEventListener('blur', stopDragging);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      window.removeEventListener('blur', stopDragging);
+      document.body.classList.remove('drag-scroll-active');
+      document.documentElement.classList.remove('drag-scroll-active');
+    };
+  }, []);
+
+  const isLoading = leaderboardLoading || usersLoading || isAvatarPreloading;
   const error = leaderboardError;
 
   const handleCreateSale = async (data: CreateSalePayload) => {
@@ -77,12 +223,23 @@ function App() {
           </motion.div>
         )}
 
+        {/* Stock Metrics */}
+        {!isLoading && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <StockMetrics stock={stock} isLoading={stockLoading} />
+          </motion.div>
+        )}
+
         {/* Leaderboard */}
         {!isLoading && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
           >
             <LeaderboardPodium
               leaderboard={leaderboard}
@@ -104,6 +261,7 @@ function App() {
         onSubmit={handleCreateSale}
         users={users}
         onLeaderboardUpdate={refetchLeaderboard}
+        onStockUpdate={refetchStock}
       />
     </div>
   );

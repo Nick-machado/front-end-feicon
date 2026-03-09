@@ -1,5 +1,5 @@
 interface RankBadgeProps {
-  rank: 1 | 2 | 3;
+  rank: number;
 }
 
 const styles = {
@@ -9,7 +9,7 @@ const styles = {
 };
 
 export function RankBadge({ rank }: RankBadgeProps) {
-  const s = styles[rank];
+  const s = styles[rank as 1 | 2 | 3] ?? { bg: 'bg-hm-gray-300', text: 'text-hm-gray-700', label: `${rank}º` };
 
   return (
     <div

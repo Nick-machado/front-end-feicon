@@ -14,7 +14,8 @@ export const saleService = {
   },
 
   async create(data: CreateSalePayload): Promise<CreateSaleResult> {
-    logger.debug('[saleService] Enviando venda', { quantity: data.quantity, uuid: data.uuid, amount: data.amount });
+    const totalQty = data.products.reduce((sum, p) => sum + p.quantity, 0);
+    logger.debug('[saleService] Enviando venda', { products: data.products, totalQty, uuid: data.uuid, amount: data.amount });
     
     try {
       const response = await apiClient.post<{

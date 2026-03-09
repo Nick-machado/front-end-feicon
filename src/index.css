@@ -21,6 +21,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+body.drag-scroll-active {
+  cursor: grabbing;
+  user-select: none;
+}
+
+html.drag-scroll-active {
+  scroll-behavior: auto;
+}
+
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Roboto', sans-serif;
   font-weight: 800;

@@ -4,7 +4,8 @@ import { Avatar } from './Avatar';
 import { RankBadge } from './RankBadge';
 import { SalesCounter } from './SalesCounter';
 import { Progress } from './Progress';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { buildAvatarCandidates, getResolvedAvatarUrl } from '../lib/avatar';
 
 interface LeaderboardCardProps {
   entry: LeaderboardEntry;
@@ -22,10 +23,16 @@ export function LeaderboardCard({
   const percentage = (totalSales / maxSales) * 100;
   const [showProgress, setShowProgress] = useState(false);
 
-  const initial = user.name.charAt(0).toUpperCase();
-  const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
-    initial
-  )}&backgroundColor=BCCF00&textColor=000000`;
+  const avatarCandidates = useMemo(() => {
+    const candidates = buildAvatarCandidates(user);
+    const resolved = getResolvedAvatarUrl(user.uuid);
+
+    if (resolved && candidates.includes(resolved)) {
+      return [resolved, ...candidates.filter((candidate) => candidate !== resolved)];
+    }
+
+    return candidates;
+  }, [user]);
 
   // 1st place uses dark card; 2nd and 3rd use light card
   const isFirst = rankAs123 === 1;
@@ -83,7 +90,11 @@ export function LeaderboardCard({
           {/* Avatar + Badge */}
           <div className="flex items-center gap-4 flex-shrink-0">
             <RankBadge rank={rankAs123} />
-            <Avatar src={avatarUrl} alt={user.name} rank={rankAs123} />
+            <Avatar
+              srcCandidates={avatarCandidates}
+              cacheKey={user.uuid}
+              alt={user.name}
+            />
           </div>
 
           {/* Info */}

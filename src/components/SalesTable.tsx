@@ -11,16 +11,18 @@ export function SalesTable() {
   const [isCreating, setIsCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<CreateSalePayload>({
-    quantity: 1,
+    products: [{ id: 1, quantity: 1 }],
     uuid: users[0]?.uuid || '',
     amount: 0,
     method: 'pix',
+    local: true,
   });
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const handleCreateSale = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.uuid || formData.quantity <= 0 || formData.amount <= 0) {
+    const totalQty = formData.products.reduce((sum, p) => sum + p.quantity, 0);
+    if (!formData.uuid || totalQty <= 0 || formData.amount <= 0) {
       alert('Preencha todos os campos corretamente');
       return;
     }
@@ -29,10 +31,11 @@ export function SalesTable() {
       setIsCreating(true);
       await createSale(formData);
       setFormData({
-        quantity: 1,
+        products: [{ id: 1, quantity: 1 }],
         uuid: users[0]?.uuid || '',
         amount: 0,
         method: 'pix',
+        local: true,
       });
       setShowForm(false);
     } catch (error) {
@@ -96,9 +99,9 @@ export function SalesTable() {
               <input
                 type="number"
                 min="1"
-                value={formData.quantity}
+                value={formData.products[0]?.quantity || 1}
                 onChange={(e) =>
-                  setFormData({ ...formData, quantity: parseInt(e.target.value) })
+                  setFormData({ ...formData, products: [{ id: 1, quantity: parseInt(e.target.value) || 1 }] })
                 }
                 className="w-full px-3 py-2 bg-hm-bg-light border border-hm-green border-opacity-10 rounded-lg text-hm-gray-700"
               />
